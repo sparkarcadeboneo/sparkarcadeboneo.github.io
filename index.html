@@ -161,6 +161,11 @@
     color:#26364a;font-size:12px;letter-spacing:2px;text-transform:uppercase;
     display:flex;align-items:center;gap:6px;
   }
+  /* static screenshot for non-spotlighted cabinets */
+  .screen .shot{
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;image-rendering:pixelated;
+  }
 
   /* ============ ZAP BUTTON ============ */
   .zap{
@@ -429,6 +434,11 @@
     return m ? m[0] : null;
   }
   const simUrl = id => "https://arcade.makecode.com/---run?id=" + encodeURIComponent(id);
+  // Static screenshot MakeCode saves when a project is shared. Tried with the
+  // share id as-is, then without the leading underscore; if neither exists
+  // (student skipped the screenshot step) the standby label shows instead.
+  const thumbUrl = id => "https://makecode.com/api/" + encodeURIComponent(id) + "/thumb";
+  const thumbUrlAlt = id => "https://makecode.com/api/" + encodeURIComponent(id.replace(/^_/, "")) + "/thumb";
 
   /* ---------- game wall state ---------- */
   const grid = document.getElementById("grid");
@@ -482,7 +492,6 @@
   }
   function stopWall(){
     cancelAnimationFrame(autoScrollFrame); autoScrollFrame = null;
-    if (screenWatcher){ screenWatcher.disconnect(); screenWatcher = null; }
     grid.querySelectorAll("iframe").forEach(f=> f.remove());
   }
 
@@ -503,42 +512,17 @@
     if (mode === "auto") autoScrollFrame = requestAnimationFrame(autoScrollTick);
   }
 
-  // Cabinets start as lightweight shells; an IntersectionObserver loads each game's
-  // live preview only when it's on (or near) screen, so the wall appears instantly
-  // and the top rows animate first. Previews that scroll far away are unloaded
-  // again to keep CPU/memory in check with a big wall of games.
-  let screenWatcher = null;
-
-  function loadCab(cab){
-    const screen = cab.querySelector(".screen");
-    if (!screen || screen.querySelector("iframe")) return;
-    const f = document.createElement("iframe");
-    f.src = simUrl(cab.dataset.id);
-    f.setAttribute("allow", "autoplay");
-    f.title = cab.dataset.gname + " preview";
-    screen.appendChild(f);
-  }
-  function unloadCab(cab){
-    const f = cab.querySelector(".screen iframe");
-    if (f) f.remove();
-  }
-
+  // Only the spotlighted cabinet runs a live sim; every other cabinet shows the
+  // static screenshot MakeCode saved when the game was shared. This keeps the
+  // wall light no matter how many games are on it — the live preview simply
+  // follows the spotlight as it moves (auto-scroll, controller, or mouse).
   function renderWall(){
-    if (screenWatcher){ screenWatcher.disconnect(); screenWatcher = null; }
     view = sortedGames();
     grid.innerHTML = "";
     emptyState.style.display = view.length ? "none" : "block";
     wallScroll.style.display = view.length ? "block" : "none";
     hintbar.style.display = view.length ? "block" : "none";
     pageInfo.textContent = view.length ? view.length + " game" + (view.length===1?"":"s") : "";
-
-    // Load previews roughly one screen ahead of the viewport; unload beyond that.
-    screenWatcher = new IntersectionObserver(entries=>{
-      for (const en of entries){
-        if (en.isIntersecting) loadCab(en.target);
-        else unloadCab(en.target);
-      }
-    }, {root: wallScroll, rootMargin: "650px 0px 650px 0px"});
 
     view.forEach((g,i)=>{
       const cab = document.createElement("div");
@@ -550,6 +534,23 @@
         '<div class="screen"><div class="standby">&#9889; standby</div></div>' +
         '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
         '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
+
+      // Static screenshot (lazy-loaded by the browser as it scrolls into view).
+      const shot = document.createElement("img");
+      shot.className = "shot";
+      shot.loading = "lazy";
+      shot.alt = "";
+      shot.dataset.fallback = "1";
+      shot.src = thumbUrl(g.id);
+      shot.addEventListener("error", ()=>{
+        if (shot.dataset.fallback === "1"){
+          shot.dataset.fallback = "0";
+          shot.src = thumbUrlAlt(g.id);   // retry without the leading underscore
+        } else {
+          shot.remove();                  // no screenshot saved -> standby label shows
+        }
+      });
+      cab.querySelector(".screen").appendChild(shot);
 
       const done = sessionZapped.has(g.id);
       const zapBtn = document.createElement("button");
@@ -568,8 +569,25 @@
         launchGame(g);
       });
       grid.appendChild(cab);
-      screenWatcher.observe(cab);
     });
+  }
+
+  /* run the live sim only inside the spotlighted cabinet (debounced so fast
+     scrolling shows screenshots and only boots the sim once you settle) */
+  let spotSimTimer = null;
+  function animateSpot(cab){
+    clearTimeout(spotSimTimer);
+    grid.querySelectorAll(".screen iframe").forEach(f=> f.remove());
+    if (!cab || inGame) return;
+    spotSimTimer = setTimeout(()=>{
+      if (inGame || !cab.classList.contains("spotlight")) return;
+      const screen = cab.querySelector(".screen");
+      const f = document.createElement("iframe");
+      f.src = simUrl(cab.dataset.id);
+      f.setAttribute("allow", "autoplay");
+      f.title = cab.dataset.gname + " preview";
+      screen.appendChild(f);   // sits on top of the screenshot
+    }, 350);
   }
 
   function highlight(){
@@ -577,6 +595,7 @@
     if (prev) prev.classList.remove("spotlight");
     const cab = grid.querySelector('.cab[data-idx="'+spot+'"]');
     if (cab) cab.classList.add("spotlight");
+    animateSpot(cab);
   }
 
   // While auto-scrolling, periodically figure out which cabinet is nearest
