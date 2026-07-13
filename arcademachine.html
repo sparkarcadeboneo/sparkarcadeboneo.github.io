@@ -157,13 +157,23 @@
   .cab.spotlight .gname{color:var(--volt)}
   .zap-btn{
     position:absolute;top:6px;right:6px;z-index:3;
-    width:28px;height:28px;border-radius:50%;
+    min-width:28px;height:28px;border-radius:14px;padding:0 8px;
     background:rgba(11,15,20,.75);border:1px solid var(--line);
-    color:var(--volt);font-size:14px;line-height:1;
-    display:flex;align-items:center;justify-content:center;
+    color:var(--volt);font-size:13px;line-height:1;font-family:'Share Tech Mono',monospace;
+    display:flex;align-items:center;justify-content:center;gap:3px;
     cursor:pointer;transition:transform .15s, border-color .15s, background .15s;
   }
   .zap-btn:hover{border-color:var(--volt);background:rgba(255,214,10,.18);transform:scale(1.12)}
+  .zap-count{font-size:11px;color:var(--text)}
+
+  .sort-toggle{display:flex;gap:6px}
+  .sort-btn{
+    font-family:'Audiowide',sans-serif;font-size:10px;letter-spacing:1px;text-transform:uppercase;
+    color:var(--dim);background:none;border:1px solid var(--line);border-radius:4px;
+    padding:6px 12px;cursor:pointer;transition:border-color .2s,color .2s;
+  }
+  .sort-btn:hover{color:var(--arc);border-color:var(--arc)}
+  .sort-btn.active{color:var(--volt);border-color:var(--volt);background:rgba(255,214,10,.1)}
 
   .hintbar{
     margin-top:12px;text-align:center;color:var(--dim);font-size:15px;letter-spacing:1px;
@@ -279,6 +289,10 @@
     <div class="msg" id="loadMsg" role="alert"></div>
     <div class="grid-head">
       <h2>Now Showing</h2>
+      <div class="sort-toggle" id="sortToggle">
+        <button class="sort-btn active" data-sort="newest">Newest</button>
+        <button class="sort-btn" data-sort="zaps">Most Zapped</button>
+      </div>
       <div class="status">
         <span class="mode-tag" id="modeTag">AUTO</span>
         <span id="pageInfo"></span>
@@ -415,9 +429,22 @@
   const emptyState = document.getElementById("emptyState");
   const hintbar = document.getElementById("hintbar");
   const modeTag = document.getElementById("modeTag");
+  const sortToggle = document.getElementById("sortToggle");
   let spot = 0;
   let mode = "auto";            // "auto" | "manual"
+  let sortMode = "newest";      // "newest" | "zaps"
   let autoScrollFrame = null, lastInput = 0;
+
+  sortToggle.addEventListener("click", e=>{
+    const btn = e.target.closest(".sort-btn");
+    if (!btn || btn.classList.contains("active")) return;
+    sortMode = btn.dataset.sort;
+    sortToggle.querySelectorAll(".sort-btn").forEach(b=> b.classList.toggle("active", b === btn));
+    spot = 0;
+    renderWall();
+    wallScroll.scrollTop = 0;
+    if (games.length) highlight();
+  });
 
   /* ---------- full-window player ---------- */
   const player = document.getElementById("player");
@@ -428,6 +455,21 @@
 
   /* ---------- zap (Lightning tip) modal ---------- */
   const ZAP_ADDRESS = "sparkarcade@coinos.io";
+  const ZAP_COUNTS_KEY = "spark-arcade-zap-counts";
+
+  // Zap counts are tallies of how many times the zap button was opened on
+  // *this* screen — a proxy for interest, not a verified record of payments
+  // received (a static page can't confirm actual Lightning payments).
+  function zapCounts(){
+    try { return JSON.parse(localStorage.getItem(ZAP_COUNTS_KEY)) || {}; }
+    catch(e){ return {}; }
+  }
+  function bumpZapCount(id){
+    const counts = zapCounts();
+    counts[id] = (counts[id] || 0) + 1;
+    localStorage.setItem(ZAP_COUNTS_KEY, JSON.stringify(counts));
+    return counts[id];
+  }
   const zapModal = document.getElementById("zapModal");
   const zapTitle = document.getElementById("zapTitle");
   const zapQr = document.getElementById("zapQr");
@@ -435,13 +477,22 @@
   const zapCopyBtn = document.getElementById("zapCopy");
   const zapCloseBtn = document.getElementById("zapClose");
 
-  function openZap(g){
+  function openZap(g, countEl){
     lastInput = Date.now();
     if (mode !== "manual") setMode("manual");
     zapTitle.textContent = 'Zap "' + g.game + '"';
     zapQr.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent("lightning:" + ZAP_ADDRESS);
     zapAddressEl.textContent = ZAP_ADDRESS;
     zapModal.classList.add("active");
+
+    const newCount = bumpZapCount(g.id);
+    if (sortMode === "zaps"){
+      spot = 0;
+      renderWall();
+      if (games.length) highlight();
+    } else if (countEl){
+      countEl.textContent = newCount;
+    }
   }
   function closeZap(){ zapModal.classList.remove("active"); }
   zapCloseBtn.addEventListener("click", closeZap);
@@ -502,6 +553,13 @@
     if (mode === "auto") autoScrollFrame = requestAnimationFrame(autoScrollTick);
   }
 
+  // Returns games in the order the wall should display them for the current sort mode.
+  function sortedGames(){
+    if (sortMode !== "zaps") return games;
+    const counts = zapCounts();
+    return [...games].sort((a,b)=> (counts[b.id]||0) - (counts[a.id]||0));
+  }
+
   // Every cabinet gets its own live iframe up front, so all the games animate
   // simultaneously instead of only the currently-selected one loading.
   function renderWall(){
@@ -511,13 +569,15 @@
     hintbar.style.display = games.length ? "block" : "none";
     pageInfo.textContent = games.length ? games.length + " game" + (games.length===1?"":"s") : "";
 
-    games.forEach((g,i)=>{
+    const counts = zapCounts();
+    sortedGames().forEach((g,i)=>{
+      const count = counts[g.id] || 0;
       const cab = document.createElement("div");
       cab.className = "cab";
       cab.dataset.idx = i;
       cab.innerHTML =
         '<div class="screen"><iframe src="' + simUrl(g.id) + '" allow="autoplay" title="' + esc(g.game) + ' preview"></iframe></div>' +
-        '<button class="zap-btn" title="Zap this game">&#9889;</button>' +
+        '<button class="zap-btn" title="Zap this game">&#9889;<span class="zap-count">' + (count>0 ? count : "") + '</span></button>' +
         '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
         '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
       cab.addEventListener("click", ()=>{
@@ -527,7 +587,7 @@
       });
       cab.querySelector(".zap-btn").addEventListener("click", e=>{
         e.stopPropagation();
-        openZap(g);
+        openZap(g, cab.querySelector(".zap-count"));
       });
       grid.appendChild(cab);
     });
@@ -626,7 +686,7 @@
         if (justPressed(5)) manualInput(()=> jumpScroll(1));
         if (justPressed(4)) manualInput(()=> jumpScroll(-1));
         // A (0): launch the selected game full-window
-        if (justPressed(0)) manualInput(()=> launchGame(games[spot]));
+        if (justPressed(0)) manualInput(()=> launchGame(sortedGames()[spot]));
         // Start (9) alone: hand back to auto-scroll
         if (justPressed(9) && !pressed(8)) setMode(mode === "auto" ? "manual" : "auto");
       }
@@ -650,7 +710,7 @@
       ArrowRight: ()=> moveSpot(1),   ArrowLeft: ()=> moveSpot(-1),
       ArrowDown:  ()=> moveSpot(cols), ArrowUp:  ()=> moveSpot(-cols),
       PageDown:   ()=> jumpScroll(1), PageUp: ()=> jumpScroll(-1),
-      Enter:      ()=> launchGame(games[spot])
+      Enter:      ()=> launchGame(sortedGames()[spot])
     };
     if (e.key === " "){ e.preventDefault(); setMode(mode==="auto"?"manual":"auto"); return; }
     if (map[e.key]){ e.preventDefault(); manualInput(map[e.key]); }
