@@ -177,6 +177,14 @@
   .search::placeholder{color:var(--dim)}
   .search:focus{outline:none;border-color:var(--arc);box-shadow:0 0 10px rgba(77,195,255,.25)}
 
+  .sort-btn{
+    font-family:inherit;font-size:14px;letter-spacing:1px;text-transform:uppercase;
+    background:var(--panel);border:1px solid var(--line);border-radius:4px;
+    color:var(--arc);padding:6px 12px;cursor:pointer;
+    transition:border-color .2s;
+  }
+  .sort-btn:hover{border-color:var(--arc)}
+
   .hintbar{
     margin-top:12px;text-align:center;color:var(--dim);font-size:15px;letter-spacing:1px;
     flex:none;
@@ -246,6 +254,7 @@
       <h2>Now Showing</h2>
       <div class="status">
         <input class="search" id="searchBox" type="search" placeholder="Search games&#8230;" autocomplete="off" spellcheck="false" aria-label="Search games by name">
+        <button class="sort-btn" id="sortBtn" title="Flip between newest-first and oldest-first">Sort: Newest</button>
         <span class="mode-tag" id="modeTag">AUTO</span>
         <span id="pageInfo"></span>
         <span class="pad-badge" id="padBadge">controller connected</span>
@@ -306,23 +315,37 @@
     return cleaned || "Untitled";
   }
 
-  /* ---------- search ---------- */
+  /* ---------- search + sort ---------- */
   const searchBox = document.getElementById("searchBox");
+  const sortBtn = document.getElementById("sortBtn");
   let query = "";
+  let sortOrder = "newest";   // "newest" | "oldest" — sheet rows are oldest-first
   function visibleGames(){
-    if (!query) return games.slice();
-    const q = query.toLowerCase();
-    return games.filter(g =>
-      g.game.toLowerCase().includes(q) || g.name.toLowerCase().includes(q));
+    let list = games.slice();
+    if (query){
+      const q = query.toLowerCase();
+      list = list.filter(g =>
+        g.game.toLowerCase().includes(q) || g.name.toLowerCase().includes(q));
+    }
+    if (sortOrder === "newest") list.reverse();
+    return list;
   }
-  function applySearch(){
-    query = searchBox.value.trim();
+  function refreshView(){
     spot = 0;
     renderWall();
     wallScroll.scrollTop = 0;
     if (view.length) highlight();
   }
+  function applySearch(){
+    query = searchBox.value.trim();
+    refreshView();
+  }
   searchBox.addEventListener("input", applySearch);
+  sortBtn.addEventListener("click", ()=>{
+    sortOrder = sortOrder === "newest" ? "oldest" : "newest";
+    sortBtn.textContent = sortOrder === "newest" ? "Sort: Newest" : "Sort: Oldest";
+    refreshView();
+  });
 
   function findCol(headers, keywords, exclude){
     for (let i=0;i<headers.length;i++){
