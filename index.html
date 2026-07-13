@@ -156,6 +156,46 @@
   }
   .cab.spotlight .gname{color:var(--volt)}
 
+  /* screen placeholder shown until the game preview lazy-loads */
+  .screen .standby{
+    color:#26364a;font-size:12px;letter-spacing:2px;text-transform:uppercase;
+    display:flex;align-items:center;gap:6px;
+  }
+
+  /* ============ ZAP BUTTON ============ */
+  .zap{
+    position:absolute;top:14px;right:14px;z-index:3;
+    display:flex;align-items:center;gap:5px;
+    background:rgba(11,15,20,.8);
+    border:1px solid var(--line);border-radius:4px;
+    color:var(--volt);font-family:'Share Tech Mono',monospace;font-size:14px;
+    padding:3px 8px;cursor:pointer;line-height:1.2;
+    transition:border-color .2s, box-shadow .2s;
+  }
+  .zap:hover{border-color:var(--volt);box-shadow:0 0 10px rgba(255,214,10,.35)}
+  .zap .zc{color:var(--text)}
+  .zap.zapped{
+    border-color:var(--volt);
+    background:rgba(255,214,10,.14);
+    box-shadow:0 0 12px rgba(255,214,10,.4);
+    cursor:default;
+  }
+  .zap.pop{animation:zapPop .45s ease}
+  @keyframes zapPop{
+    0%{transform:scale(1)}
+    35%{transform:scale(1.4) rotate(-8deg)}
+    100%{transform:scale(1)}
+  }
+
+  .sort-btn{
+    font-family:inherit;font-size:14px;letter-spacing:1px;text-transform:uppercase;
+    background:var(--panel);border:1px solid var(--line);border-radius:4px;
+    color:var(--arc);padding:5px 10px;cursor:pointer;
+    transition:border-color .2s, color .2s;
+  }
+  .sort-btn:hover{border-color:var(--arc)}
+  .sort-btn.by-zaps{color:var(--volt);border-color:var(--volt)}
+
   .hintbar{
     margin-top:12px;text-align:center;color:var(--dim);font-size:15px;letter-spacing:1px;
     flex:none;
@@ -205,6 +245,7 @@
     .arcline::after{animation:none;left:40%}
     h1 .bolt{animation:none}
     .cab{transition:none}
+    .zap.pop{animation:none}
   }
 </style>
 </head>
@@ -224,6 +265,7 @@
     <div class="grid-head">
       <h2>Now Showing</h2>
       <div class="status">
+        <button class="sort-btn" id="sortBtn" title="Toggle between newest games and most zapped">Sort: Newest</button>
         <span class="mode-tag" id="modeTag">AUTO</span>
         <span id="pageInfo"></span>
         <span class="pad-badge" id="padBadge">controller connected</span>
@@ -235,7 +277,7 @@
       <p>New games added to the spreadsheet will appear here automatically.</p>
     </div>
     <div class="hintbar" id="hintbar">
-      &#127918; <kbd>D-Pad / Stick</kbd> scroll &amp; select &nbsp; <kbd>A</kbd> launch &nbsp; <kbd>LB / RB</kbd> jump &nbsp; <kbd>Start</kbd> auto-scroll &nbsp;&bull;&nbsp; arrows + Enter work too
+      &#127918; <kbd>D-Pad / Stick</kbd> scroll &amp; select &nbsp; <kbd>A</kbd> launch &nbsp; <kbd>Y</kbd> zap &#9889; &nbsp; <kbd>LB / RB</kbd> jump &nbsp; <kbd>Start</kbd> auto-scroll &nbsp;&bull;&nbsp; arrows, <kbd>Z</kbd> + Enter work too
     </div>
   </section>
 
@@ -259,7 +301,56 @@
   const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYOnFCDtaPGF_q7MDIkaXa8Bu8hjXR1rIMR1oZfND8uf8Z8An-VdEXty5WZL8OF7f3VHzLEYG4noED/pub?output=xlsx";
   const REFRESH_MS = 5 * 60 * 1000; // re-check the sheet every 5 minutes so new entries appear without a page reload
   const loadMsg = document.getElementById("loadMsg");
-  let games = [];
+  let games = [];   // newest-first, straight from the sheet
+  let view = [];    // the order currently shown on the wall (after sorting)
+
+  /* ---------- zaps: counts persist on this device, one zap per game per session ---------- */
+  const ZAP_KEY = "sparkArcadeZaps";
+  const SESSION_KEY = "sparkArcadeZappedThisSession";
+  let zaps = {};
+  let sessionZapped = new Set();   // in-memory fallback if storage is unavailable
+  try { zaps = JSON.parse(localStorage.getItem(ZAP_KEY) || "{}") || {}; } catch(e){}
+  try { sessionZapped = new Set(JSON.parse(sessionStorage.getItem(SESSION_KEY) || "[]")); } catch(e){}
+
+  function saveZaps(){
+    try { localStorage.setItem(ZAP_KEY, JSON.stringify(zaps)); } catch(e){}
+  }
+  function markSessionZapped(id){
+    sessionZapped.add(id);
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify([...sessionZapped])); } catch(e){}
+  }
+  function zapGame(g, btn){
+    if (!g || sessionZapped.has(g.id)) return;
+    zaps[g.id] = (zaps[g.id] || 0) + 1;
+    saveZaps();
+    markSessionZapped(g.id);
+    if (btn){
+      btn.classList.add("zapped", "pop");
+      btn.title = "Zapped! One zap per game per visit";
+      const zc = btn.querySelector(".zc");
+      if (zc) zc.textContent = zaps[g.id];
+      setTimeout(()=> btn.classList.remove("pop"), 500);
+    }
+  }
+
+  /* ---------- sorting ---------- */
+  let sortMode = "new";   // "new" | "zaps"
+  const sortBtn = document.getElementById("sortBtn");
+  function sortedGames(){
+    if (sortMode === "zaps"){
+      return [...games].sort((a,b)=> (zaps[b.id]||0) - (zaps[a.id]||0));
+    }
+    return games.slice();
+  }
+  sortBtn.addEventListener("click", ()=>{
+    sortMode = sortMode === "new" ? "zaps" : "new";
+    sortBtn.textContent = sortMode === "new" ? "Sort: Newest" : "Sort: Most Zapped \u26A1";
+    sortBtn.classList.toggle("by-zaps", sortMode === "zaps");
+    spot = 0;
+    renderWall();
+    wallScroll.scrollTop = 0;
+    if (view.length) highlight();
+  });
 
   function findCol(headers, keywords, exclude){
     for (let i=0;i<headers.length;i++){
@@ -380,10 +471,18 @@
     spot = 0;
     renderWall();
     wallScroll.scrollTop = 0;
-    if (games.length){ highlight(); setMode("auto"); }
+    if (view.length){ highlight(); setMode("auto"); }
+  }
+
+  /* zap whichever cabinet is currently spotlighted (controller / keyboard) */
+  function zapSpot(){
+    if (!view.length) return;
+    const cab = grid.querySelector('.cab[data-idx="'+spot+'"]');
+    zapGame(view[spot], cab ? cab.querySelector(".zap") : null);
   }
   function stopWall(){
     cancelAnimationFrame(autoScrollFrame); autoScrollFrame = null;
+    if (screenWatcher){ screenWatcher.disconnect(); screenWatcher = null; }
     grid.querySelectorAll("iframe").forEach(f=> f.remove());
   }
 
@@ -391,7 +490,7 @@
     mode = m;
     modeTag.textContent = m.toUpperCase();
     cancelAnimationFrame(autoScrollFrame); autoScrollFrame = null;
-    if (m === "auto" && games.length) autoScrollFrame = requestAnimationFrame(autoScrollTick);
+    if (m === "auto" && view.length) autoScrollFrame = requestAnimationFrame(autoScrollTick);
   }
 
   let syncCounter = 0;
@@ -404,29 +503,72 @@
     if (mode === "auto") autoScrollFrame = requestAnimationFrame(autoScrollTick);
   }
 
-  // Every cabinet gets its own live iframe up front, so all the games animate
-  // simultaneously instead of only the currently-selected one loading.
-  function renderWall(){
-    grid.innerHTML = "";
-    emptyState.style.display = games.length ? "none" : "block";
-    wallScroll.style.display = games.length ? "block" : "none";
-    hintbar.style.display = games.length ? "block" : "none";
-    pageInfo.textContent = games.length ? games.length + " game" + (games.length===1?"":"s") : "";
+  // Cabinets start as lightweight shells; an IntersectionObserver loads each game's
+  // live preview only when it's on (or near) screen, so the wall appears instantly
+  // and the top rows animate first. Previews that scroll far away are unloaded
+  // again to keep CPU/memory in check with a big wall of games.
+  let screenWatcher = null;
 
-    games.forEach((g,i)=>{
+  function loadCab(cab){
+    const screen = cab.querySelector(".screen");
+    if (!screen || screen.querySelector("iframe")) return;
+    const f = document.createElement("iframe");
+    f.src = simUrl(cab.dataset.id);
+    f.setAttribute("allow", "autoplay");
+    f.title = cab.dataset.gname + " preview";
+    screen.appendChild(f);
+  }
+  function unloadCab(cab){
+    const f = cab.querySelector(".screen iframe");
+    if (f) f.remove();
+  }
+
+  function renderWall(){
+    if (screenWatcher){ screenWatcher.disconnect(); screenWatcher = null; }
+    view = sortedGames();
+    grid.innerHTML = "";
+    emptyState.style.display = view.length ? "none" : "block";
+    wallScroll.style.display = view.length ? "block" : "none";
+    hintbar.style.display = view.length ? "block" : "none";
+    pageInfo.textContent = view.length ? view.length + " game" + (view.length===1?"":"s") : "";
+
+    // Load previews roughly one screen ahead of the viewport; unload beyond that.
+    screenWatcher = new IntersectionObserver(entries=>{
+      for (const en of entries){
+        if (en.isIntersecting) loadCab(en.target);
+        else unloadCab(en.target);
+      }
+    }, {root: wallScroll, rootMargin: "650px 0px 650px 0px"});
+
+    view.forEach((g,i)=>{
       const cab = document.createElement("div");
       cab.className = "cab";
       cab.dataset.idx = i;
+      cab.dataset.id = g.id;
+      cab.dataset.gname = g.game;
       cab.innerHTML =
-        '<div class="screen"><iframe src="' + simUrl(g.id) + '" allow="autoplay" title="' + esc(g.game) + ' preview"></iframe></div>' +
+        '<div class="screen"><div class="standby">&#9889; standby</div></div>' +
         '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
         '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
+
+      const done = sessionZapped.has(g.id);
+      const zapBtn = document.createElement("button");
+      zapBtn.className = "zap" + (done ? " zapped" : "");
+      zapBtn.title = done ? "Zapped! One zap per game per visit" : "Zap this game \u2014 one zap per visit";
+      zapBtn.innerHTML = '&#9889;<span class="zc">' + (zaps[g.id] || 0) + '</span>';
+      zapBtn.addEventListener("click", e=>{
+        e.stopPropagation();            // zapping shouldn't launch the game
+        zapGame(g, zapBtn);
+      });
+      cab.appendChild(zapBtn);
+
       cab.addEventListener("click", ()=>{
         spot = i;
         highlight();
         launchGame(g);
       });
       grid.appendChild(cab);
+      screenWatcher.observe(cab);
     });
   }
 
@@ -460,8 +602,8 @@
 
   /* move selection by n cabinets and bring it to the centre of the wall (wraps) */
   function moveSpot(n){
-    if (!games.length) return;
-    spot = ((spot + n) % games.length + games.length) % games.length;
+    if (!view.length) return;
+    spot = ((spot + n) % view.length + view.length) % view.length;
     highlight();
     const cab = grid.querySelector('.cab[data-idx="'+spot+'"]');
     if (cab) cab.scrollIntoView({behavior:"smooth", block:"center"});
@@ -469,7 +611,7 @@
 
   /* bigger scroll nudge for LB/RB and Page Up/Down */
   function jumpScroll(dir){
-    if (!games.length) return;
+    if (!view.length) return;
     wallScroll.scrollBy({top: dir * wallScroll.clientHeight * 0.85, behavior:"smooth"});
     setTimeout(syncSpotFromViewport, 450);
   }
@@ -505,7 +647,7 @@
       if (comboNow && !comboHeld[pad.index] && inGame) returnToMenu();
       comboHeld[pad.index] = comboNow;
 
-      if (wallActive && !inGame && games.length){
+      if (wallActive && !inGame && view.length){
         const cols = actualCols();
         // D-pad: 12 up, 13 down, 14 left, 15 right
         if (justPressed(15)) manualInput(()=> moveSpot(1));
@@ -523,7 +665,9 @@
         if (justPressed(5)) manualInput(()=> jumpScroll(1));
         if (justPressed(4)) manualInput(()=> jumpScroll(-1));
         // A (0): launch the selected game full-window
-        if (justPressed(0)) manualInput(()=> launchGame(games[spot]));
+        if (justPressed(0)) manualInput(()=> launchGame(view[spot]));
+        // Y (3): zap the selected game
+        if (justPressed(3)) manualInput(zapSpot);
         // Start (9) alone: hand back to auto-scroll
         if (justPressed(9) && !pressed(8)) setMode(mode === "auto" ? "manual" : "auto");
       }
@@ -537,13 +681,14 @@
 
   document.addEventListener("keydown", e=>{
     if (e.key === "Escape"){ if (inGame){ e.preventDefault(); returnToMenu(); } return; }
-    if (!wallActive || inGame || !games.length) return;
+    if (!wallActive || inGame || !view.length) return;
     const cols = actualCols();
     const map = {
       ArrowRight: ()=> moveSpot(1),   ArrowLeft: ()=> moveSpot(-1),
       ArrowDown:  ()=> moveSpot(cols), ArrowUp:  ()=> moveSpot(-cols),
       PageDown:   ()=> jumpScroll(1), PageUp: ()=> jumpScroll(-1),
-      Enter:      ()=> launchGame(games[spot])
+      Enter:      ()=> launchGame(view[spot]),
+      z:          zapSpot,            Z: zapSpot
     };
     if (e.key === " "){ e.preventDefault(); setMode(mode==="auto"?"manual":"auto"); return; }
     if (map[e.key]){ e.preventDefault(); manualInput(map[e.key]); }
