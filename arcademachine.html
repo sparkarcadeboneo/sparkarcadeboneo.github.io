@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPARK Arcade</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj4KPHJlY3Qgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIHJ4PSIyMCIgZmlsbD0iIzBiMGYxNCIvPgo8cG9seWdvbiBwb2ludHM9IjU4LDYgMjAsNTggNDYsNTggNDAsOTQgODIsNDAgNTQsNDAiIGZpbGw9IiNmZmQ2MGEiLz4KPC9zdmc+">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0f14;        /* carbon */
+    --panel:#141b24;
+    --panel-2:#1b2531;
+    --line:#2b3a4d;
+    --volt:#ffd60a;      /* spark yellow */
+    --arc:#4dc3ff;       /* plasma blue */
+    --hot:#ff6b35;       /* ember - used sparingly */
+    --ok:#54e38e;
+    --text:#e9f1f7;
+    --dim:#7f93a8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(1200px 500px at 50% -200px, rgba(77,195,255,.10), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Share Tech Mono',monospace;
+    font-size:17px;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  /* faint circuit-trace texture */
+  body::before{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background-image:
+      linear-gradient(rgba(77,195,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(77,195,255,.045) 1px, transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(ellipse at 50% 0%, black 20%, transparent 75%);
+  }
+  main,header,nav,footer{position:relative;z-index:1}
+
+  /* ============ HEADER ============ */
+  header{
+    text-align:center;
+    padding:30px 16px 0;
+    flex:none;
+  }
+  h1{
+    font-family:'Audiowide',sans-serif;
+    font-size:clamp(26px,5vw,52px);
+    letter-spacing:6px;
+    text-transform:uppercase;
+    color:var(--text);
+  }
+  h1 .spark{
+    color:var(--volt);
+    text-shadow:0 0 14px rgba(255,214,10,.65), 0 0 40px rgba(255,214,10,.3);
+  }
+  h1 .bolt{
+    display:inline-block;
+    color:var(--volt);
+    transform:translateY(2px);
+    filter:drop-shadow(0 0 8px rgba(255,214,10,.8));
+    animation:flicker 4s infinite;
+  }
+  @keyframes flicker{
+    0%,92%,96%,100%{opacity:1}
+    93%,95%{opacity:.35}
+  }
+  .tagline{margin-top:8px;color:var(--dim);letter-spacing:3px;text-transform:uppercase;font-size:14px}
+  .tagline b{color:var(--arc);font-weight:normal}
+
+  /* animated energy line under the title */
+  .arcline{
+    height:3px;max-width:760px;margin:20px auto 0;position:relative;
+    background:linear-gradient(90deg, transparent, var(--line) 15%, var(--line) 85%, transparent);
+    overflow:hidden;border-radius:2px;
+  }
+  .arcline::after{
+    content:"";position:absolute;top:0;bottom:0;width:90px;
+    background:linear-gradient(90deg, transparent, var(--volt), var(--arc), transparent);
+    filter:blur(1px);
+    animation:travel 2.6s linear infinite;
+  }
+  @keyframes travel{from{left:-100px}to{left:100%}}
+
+  main{max-width:1520px;width:100%;margin:0 auto;padding:26px 18px 14px;flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  .view{display:none}
+  .view.active{display:flex;flex-direction:column;flex:1;min-height:0}
+
+  /* ============ GAME WALL ============ */
+  .grid-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;flex:none}
+  .grid-head h2{
+    font-family:'Audiowide',sans-serif;font-size:15px;letter-spacing:3px;color:var(--volt);text-transform:uppercase;
+  }
+  .status{display:flex;align-items:center;gap:16px;color:var(--dim);font-size:15px}
+  .pad-badge{
+    display:none;align-items:center;gap:8px;
+    border:1px solid var(--line);border-radius:4px;padding:5px 10px;color:var(--ok);
+  }
+  .pad-badge.on{display:inline-flex}
+  .pad-badge::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .mode-tag{color:var(--arc)}
+
+  #wallScroll{
+    flex:1;min-height:0;overflow-y:auto;
+    scrollbar-width:none;
+  }
+  #wallScroll::-webkit-scrollbar{display:none}
+
+  #grid{
+    display:grid;
+    grid-template-columns:repeat(6,1fr);
+    gap:13px;
+    padding-bottom:6px;
+  }
+  @media (max-width:1100px){#grid{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:640px){#grid{grid-template-columns:repeat(2,1fr)}}
+
+  .cab{
+    position:relative;
+    background:linear-gradient(180deg,var(--panel-2),var(--panel));
+    border:1px solid var(--line);
+    border-radius:6px;
+    min-height:198px;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    cursor:pointer;
+    transition:border-color .25s, box-shadow .25s, transform .25s;
+  }
+  .cab:hover{border-color:var(--arc)}
+  .cab .screen{
+    flex:1;position:relative;background:#05080c;margin:9px 9px 5px;
+    border:1px solid #000;border-radius:4px;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;
+    aspect-ratio:16/10;
+  }
+  .cab iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .cab .label{padding:3px 10px 9px;text-align:center}
+  .cab .gname{
+    font-family:'Audiowide',sans-serif;font-size:12px;letter-spacing:1px;color:var(--arc);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .cab .who{color:var(--dim);font-size:15px;margin-top:2px}
+  .cab.spotlight{
+    border-color:var(--volt);
+    box-shadow:0 0 0 1px var(--volt), 0 0 22px rgba(255,214,10,.35), inset 0 0 14px rgba(255,214,10,.08);
+    transform:scale(1.02);
+    z-index:2;
+  }
+  .cab.spotlight .gname{color:var(--volt)}
+
+  .hintbar{
+    margin-top:12px;text-align:center;color:var(--dim);font-size:15px;letter-spacing:1px;
+    flex:none;
+  }
+  .hintbar kbd{
+    font-family:inherit;border:1px solid var(--line);border-radius:4px;
+    padding:2px 8px;color:var(--arc);background:var(--panel);
+  }
+
+  .empty-state{text-align:center;padding:70px 20px;color:var(--dim);flex:none}
+  .empty-state .big{
+    font-family:'Audiowide',sans-serif;font-size:18px;letter-spacing:3px;color:var(--volt);
+    line-height:2;margin-bottom:14px;text-transform:uppercase;
+  }
+
+  /* ============ FULL-WINDOW PLAYER ============ */
+  #player{
+    position:fixed;inset:0;z-index:100;background:#000;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+  }
+  #player.active{display:flex}
+  #player iframe{
+    width:min(94vw, calc(90vh * 4 / 3));
+    height:min(90vh, calc(94vw * 3 / 4));
+    border:0;background:#000;display:block;
+  }
+  #playerHint{
+    position:fixed;left:0;right:0;bottom:0;z-index:101;
+    text-align:center;color:var(--dim);font-size:14px;letter-spacing:1px;
+    padding:10px;background:linear-gradient(0deg, rgba(0,0,0,.85), transparent);
+    pointer-events:none;
+    display:none;
+  }
+  #playerHint kbd{
+    font-family:inherit;border:1px solid var(--line);border-radius:4px;
+    padding:2px 8px;color:var(--arc);background:var(--panel);
+  }
+
+  /* ============ STATUS MESSAGE ============ */
+  .msg{margin:0 auto 16px;max-width:640px;padding:12px 14px;border-radius:4px;display:none;text-align:center;flex:none}
+  .msg.err{display:block;background:#2a1410;border:1px solid var(--hot);color:#ffb59e}
+  .msg.ok{display:block;background:#0e2417;border:1px solid var(--ok);color:#a9f5c9}
+
+  footer{text-align:center;color:#3a4c60;padding:22px;font-size:14px;letter-spacing:2px;text-transform:uppercase;flex:none}
+
+  @media (prefers-reduced-motion:reduce){
+    .arcline::after{animation:none;left:40%}
+    h1 .bolt{animation:none}
+    .cab{transition:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="spark">SPARK</span> <span class="bolt">&#9889;</span> ARCADE</h1>
+  <div class="tagline">Student-built games &bull; <b>SPARK Centre</b> &bull; Boneo Primary</div>
+  <div class="arcline" aria-hidden="true"></div>
+</header>
+
+<main>
+
+  <!-- ========== GAME WALL ========== -->
+  <section id="view-play" class="view active">
+    <div class="msg" id="loadMsg" role="alert"></div>
+    <div class="grid-head">
+      <h2>Now Showing</h2>
+      <div class="status">
+        <span class="mode-tag" id="modeTag">AUTO</span>
+        <span id="pageInfo"></span>
+        <span class="pad-badge" id="padBadge">controller connected</span>
+      </div>
+    </div>
+    <div id="wallScroll"><div id="grid"></div></div>
+    <div class="empty-state" id="emptyState" style="display:none">
+      <div class="big">No games on the wall yet</div>
+      <p>New games added to the spreadsheet will appear here automatically.</p>
+    </div>
+    <div class="hintbar" id="hintbar">
+      &#127918; <kbd>D-Pad / Stick</kbd> scroll &amp; select &nbsp; <kbd>A</kbd> launch &nbsp; <kbd>LB / RB</kbd> jump &nbsp; <kbd>Start</kbd> auto-scroll &nbsp;&bull;&nbsp; arrows + Enter work too
+    </div>
+  </section>
+
+</main>
+
+<div id="player">
+  <iframe id="playerFrame" title="Game player" allow="autoplay" src="about:blank"></iframe>
+</div>
+<div id="playerHint">Hold <kbd>Start</kbd> + <kbd>Back</kbd> together (or press <kbd>Esc</kbd>) to return to the menu</div>
+
+<footer>SPARK Centre &bull; Boneo Primary School &bull; Free Play</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  const IDLE_BACK_TO_AUTO = 45000;   // manual -> auto after 45s of no input
+  const AUTO_SCROLL_SPEED = 0.15;    // px per animation frame while auto-scrolling (~9px/sec)
+
+  /* ---------- game data source: published Google Sheet (xlsx) ---------- */
+  const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQYOnFCDtaPGF_q7MDIkaXa8Bu8hjXR1rIMR1oZfND8uf8Z8An-VdEXty5WZL8OF7f3VHzLEYG4noED/pub?output=xlsx";
+  const REFRESH_MS = 5 * 60 * 1000; // re-check the sheet every 5 minutes so new entries appear without a page reload
+  const loadMsg = document.getElementById("loadMsg");
+  let games = [];
+
+  function findCol(headers, keywords, exclude){
+    for (let i=0;i<headers.length;i++){
+      if (exclude != null && i === exclude) continue;
+      const h = headers[i];
+      if (keywords.some(k => h.includes(k))) return i;
+    }
+    return -1;
+  }
+
+  // Turns the sheet's rows into the {id, name, grade, game} shape the wall renders.
+  // Column headers are matched flexibly (case-insensitive, partial match) so small
+  // wording changes in the spreadsheet don't break the wall.
+  function rowsToGames(rows){
+    if (!rows.length) return [];
+    const headers = rows[0].map(h => String(h||"").trim().toLowerCase());
+    const gameIdx  = findCol(headers, ["game name","game title","game"]);
+    const urlIdx   = findCol(headers, ["makecode","share link","link","url"]);
+    const gradeIdx = findCol(headers, ["grade","year level","year"]);
+    const nameIdx  = findCol(headers, ["first name","student name","name"], gameIdx);
+
+    const out = [];
+    for (let r=1;r<rows.length;r++){
+      const row = rows[r];
+      if (!row || !row.length) continue;
+      const rawUrl = urlIdx  > -1 ? String(row[urlIdx]  ?? "").trim() : "";
+      const id = extractId(rawUrl);
+      if (!id) continue; // skip rows without a usable MakeCode link
+      out.push({
+        id,
+        name:  nameIdx  > -1 ? String(row[nameIdx]  ?? "").trim() : "",
+        grade: gradeIdx > -1 ? String(row[gradeIdx] ?? "").trim() : "",
+        game:  gameIdx  > -1 ? String(row[gameIdx]  ?? "").trim() || "Untitled" : "Untitled"
+      });
+    }
+    return out.reverse();
+  }
+
+  async function fetchGames(){
+    const res = await fetch(SHEET_URL, {cache:"no-store"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, {type:"array"});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false, defval:""});
+    return rowsToGames(rows);
+  }
+
+  async function refreshGames(isFirstLoad){
+    try {
+      const next = await fetchGames();
+      const changed = JSON.stringify(next) !== JSON.stringify(games);
+      games = next;
+      loadMsg.className = "msg";
+      if (changed){
+        if (wallActive) startWall(); else renderWall();
+      }
+    } catch(e){
+      if (isFirstLoad){
+        loadMsg.textContent = "Couldn't load games from the spreadsheet. Check the sheet is published and try refreshing.";
+        loadMsg.className = "msg err";
+      }
+      console.error("SPARK Arcade: failed to load games", e);
+    }
+  }
+
+  /* ---------- wall state ---------- */
+  let wallActive = true;
+
+  /* ---------- makecode helpers ---------- */
+  function extractId(input){
+    input = (input||"").trim();
+    let m = input.match(/(?:makecode\.com\/(?:#pub:)?|^)(_[A-Za-z0-9]{8,})$/);
+    if (m) return m[1];
+    m = input.match(/_[A-Za-z0-9]{8,}/);
+    return m ? m[0] : null;
+  }
+  const simUrl = id => "https://arcade.makecode.com/---run?id=" + encodeURIComponent(id);
+
+  /* ---------- game wall state ---------- */
+  const grid = document.getElementById("grid");
+  const wallScroll = document.getElementById("wallScroll");
+  const pageInfo = document.getElementById("pageInfo");
+  const emptyState = document.getElementById("emptyState");
+  const hintbar = document.getElementById("hintbar");
+  const modeTag = document.getElementById("modeTag");
+  let spot = 0;
+  let mode = "auto";            // "auto" | "manual"
+  let autoScrollFrame = null, lastInput = 0;
+
+  /* ---------- full-window player ---------- */
+  const player = document.getElementById("player");
+  const playerFrame = document.getElementById("playerFrame");
+  const playerHint = document.getElementById("playerHint");
+  let inGame = false;
+
+  function launchGame(g){
+    if (!g) return;
+    stopWall();
+    playerFrame.src = simUrl(g.id);
+    player.classList.add("active");
+    playerHint.style.display = "block";
+    inGame = true;
+    wallActive = false;
+  }
+  function returnToMenu(){
+    if (!inGame) return;
+    playerFrame.src = "about:blank";
+    player.classList.remove("active");
+    playerHint.style.display = "none";
+    inGame = false;
+    wallActive = true;
+    startWall();
+  }
+
+  function startWall(){
+    stopWall();
+    spot = 0;
+    renderWall();
+    wallScroll.scrollTop = 0;
+    if (games.length){ highlight(); setMode("auto"); }
+  }
+  function stopWall(){
+    cancelAnimationFrame(autoScrollFrame); autoScrollFrame = null;
+    grid.querySelectorAll("iframe").forEach(f=> f.remove());
+  }
+
+  function setMode(m){
+    mode = m;
+    modeTag.textContent = m.toUpperCase();
+    cancelAnimationFrame(autoScrollFrame); autoScrollFrame = null;
+    if (m === "auto" && games.length) autoScrollFrame = requestAnimationFrame(autoScrollTick);
+  }
+
+  let syncCounter = 0;
+  function autoScrollTick(){
+    wallScroll.scrollTop += AUTO_SCROLL_SPEED;
+    if (wallScroll.scrollTop + wallScroll.clientHeight >= wallScroll.scrollHeight - 2){
+      wallScroll.scrollTop = 0;
+    }
+    if (++syncCounter % 12 === 0) syncSpotFromViewport();
+    if (mode === "auto") autoScrollFrame = requestAnimationFrame(autoScrollTick);
+  }
+
+  // Every cabinet gets its own live iframe up front, so all the games animate
+  // simultaneously instead of only the currently-selected one loading.
+  function renderWall(){
+    grid.innerHTML = "";
+    emptyState.style.display = games.length ? "none" : "block";
+    wallScroll.style.display = games.length ? "block" : "none";
+    hintbar.style.display = games.length ? "block" : "none";
+    pageInfo.textContent = games.length ? games.length + " game" + (games.length===1?"":"s") : "";
+
+    games.forEach((g,i)=>{
+      const cab = document.createElement("div");
+      cab.className = "cab";
+      cab.dataset.idx = i;
+      cab.innerHTML =
+        '<div class="screen"><iframe src="' + simUrl(g.id) + '" allow="autoplay" title="' + esc(g.game) + ' preview"></iframe></div>' +
+        '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
+        '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
+      cab.addEventListener("click", ()=>{
+        spot = i;
+        highlight();
+        launchGame(g);
+      });
+      grid.appendChild(cab);
+    });
+  }
+
+  function highlight(){
+    const prev = grid.querySelector(".cab.spotlight");
+    if (prev) prev.classList.remove("spotlight");
+    const cab = grid.querySelector('.cab[data-idx="'+spot+'"]');
+    if (cab) cab.classList.add("spotlight");
+  }
+
+  // While auto-scrolling, periodically figure out which cabinet is nearest
+  // the centre of the visible wall area and treat that as the selection.
+  function syncSpotFromViewport(){
+    const cabs = grid.children;
+    if (!cabs.length) return;
+    const box = wallScroll.getBoundingClientRect();
+    const centerY = box.top + box.height / 2;
+    let best = 0, bestDist = Infinity;
+    for (let i=0;i<cabs.length;i++){
+      const r = cabs[i].getBoundingClientRect();
+      const d = Math.abs((r.top + r.bottom)/2 - centerY);
+      if (d < bestDist){ bestDist = d; best = i; }
+    }
+    if (best !== spot){ spot = best; highlight(); }
+  }
+
+  function actualCols(){
+    const cols = getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length;
+    return cols || 1;
+  }
+
+  /* move selection by n cabinets and bring it to the centre of the wall (wraps) */
+  function moveSpot(n){
+    if (!games.length) return;
+    spot = ((spot + n) % games.length + games.length) % games.length;
+    highlight();
+    const cab = grid.querySelector('.cab[data-idx="'+spot+'"]');
+    if (cab) cab.scrollIntoView({behavior:"smooth", block:"center"});
+  }
+
+  /* bigger scroll nudge for LB/RB and Page Up/Down */
+  function jumpScroll(dir){
+    if (!games.length) return;
+    wallScroll.scrollBy({top: dir * wallScroll.clientHeight * 0.85, behavior:"smooth"});
+    setTimeout(syncSpotFromViewport, 450);
+  }
+
+  /* ---------- input: gamepad + keyboard ---------- */
+  const padBadge = document.getElementById("padBadge");
+  const DEADZONE = 0.5;
+  const prevBtns = {};      // per-gamepad previous button state
+  let stickHeld = {x:0, y:0};
+  let comboHeld = {};       // per-gamepad Start+Back combo edge detection
+
+  window.addEventListener("gamepadconnected", ()=> padBadge.classList.add("on"));
+  window.addEventListener("gamepaddisconnected", ()=>{
+    if (![...navigator.getGamepads()].some(Boolean)) padBadge.classList.remove("on");
+  });
+
+  function manualInput(fn){
+    lastInput = Date.now();
+    if (mode !== "manual") setMode("manual");
+    fn();
+  }
+
+  function pollPads(){
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const pad of pads){
+      if (!pad) continue;
+      const prev = prevBtns[pad.index] || [];
+      const pressed = i => pad.buttons[i] && pad.buttons[i].pressed;
+      const justPressed = i => pressed(i) && !prev[i];
+
+      // Start (9) + Back/Select (8) together -> return to the menu, works while a game is playing
+      const comboNow = pressed(9) && pressed(8);
+      if (comboNow && !comboHeld[pad.index] && inGame) returnToMenu();
+      comboHeld[pad.index] = comboNow;
+
+      if (wallActive && !inGame && games.length){
+        const cols = actualCols();
+        // D-pad: 12 up, 13 down, 14 left, 15 right
+        if (justPressed(15)) manualInput(()=> moveSpot(1));
+        if (justPressed(14)) manualInput(()=> moveSpot(-1));
+        if (justPressed(13)) manualInput(()=> moveSpot(cols));
+        if (justPressed(12)) manualInput(()=> moveSpot(-cols));
+        // Left stick with edge detection
+        const x = pad.axes[0] || 0, y = pad.axes[1] || 0;
+        const sx = Math.abs(x) > DEADZONE ? Math.sign(x) : 0;
+        const sy = Math.abs(y) > DEADZONE ? Math.sign(y) : 0;
+        if (sx !== 0 && sx !== stickHeld.x) manualInput(()=> moveSpot(sx));
+        if (sy !== 0 && sy !== stickHeld.y) manualInput(()=> moveSpot(sy * cols));
+        stickHeld = {x:sx, y:sy};
+        // Bumpers: 4 LB, 5 RB -> jump-scroll by roughly one screen
+        if (justPressed(5)) manualInput(()=> jumpScroll(1));
+        if (justPressed(4)) manualInput(()=> jumpScroll(-1));
+        // A (0): launch the selected game full-window
+        if (justPressed(0)) manualInput(()=> launchGame(games[spot]));
+        // Start (9) alone: hand back to auto-scroll
+        if (justPressed(9) && !pressed(8)) setMode(mode === "auto" ? "manual" : "auto");
+      }
+      prevBtns[pad.index] = pad.buttons.map(b=> b.pressed);
+    }
+    // idle in manual mode -> resume auto
+    if (mode === "manual" && !inGame && Date.now() - lastInput > IDLE_BACK_TO_AUTO) setMode("auto");
+    requestAnimationFrame(pollPads);
+  }
+  requestAnimationFrame(pollPads);
+
+  document.addEventListener("keydown", e=>{
+    if (e.key === "Escape"){ if (inGame){ e.preventDefault(); returnToMenu(); } return; }
+    if (!wallActive || inGame || !games.length) return;
+    const cols = actualCols();
+    const map = {
+      ArrowRight: ()=> moveSpot(1),   ArrowLeft: ()=> moveSpot(-1),
+      ArrowDown:  ()=> moveSpot(cols), ArrowUp:  ()=> moveSpot(-cols),
+      PageDown:   ()=> jumpScroll(1), PageUp: ()=> jumpScroll(-1),
+      Enter:      ()=> launchGame(games[spot])
+    };
+    if (e.key === " "){ e.preventDefault(); setMode(mode==="auto"?"manual":"auto"); return; }
+    if (map[e.key]){ e.preventDefault(); manualInput(map[e.key]); }
+  });
+
+  /* ---------- utils ---------- */
+  function esc(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  /* ---------- init ---------- */
+  loadMsg.textContent = "Loading games from the spreadsheet\u2026";
+  loadMsg.className = "msg ok";
+  refreshGames(true).then(()=>{
+    startWall();
+    setInterval(()=> refreshGames(false), REFRESH_MS);
+  });
+})();
+</script>
+</body>
+</html>
