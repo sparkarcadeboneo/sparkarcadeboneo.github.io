@@ -479,10 +479,12 @@
       '<div class="coin-text">insert coin</div>' +
     '</div>';
 
-  /* If a screenshot is a MakeCode "GAME OVER" screen (heavily dimmed scene with
-     white text in the middle band), hide it so the rotating arcade machine shows
-     instead. Pixel checks need CORS access to the image; if the host doesn't
-     allow it, we quietly keep the screenshot rather than break anything. */
+  /* If a screenshot is a "GAME OVER" screen — a dark screen with a band of
+     pixel-font text (any colour) — hide it so the rotating arcade machine shows
+     instead. Text is recognised by rows with many bright/dark alternations
+     (letters make lots of edges; sprites and stars make very few). Pixel checks
+     need CORS access to the image; if the host doesn't allow it, we quietly
+     keep the screenshot rather than break anything. */
   function hideIfGameOver(url, shot){
     const probe = new Image();
     probe.crossOrigin = "anonymous";
@@ -494,23 +496,27 @@
         const ctx = cv.getContext("2d");
         ctx.drawImage(probe, 0, 0, w, h);
         const px = ctx.getImageData(0, 0, w, h).data;
-        let dark = 0, white = 0, whiteMid = 0;
+        let dark = 0, brightTotal = 0, texty = 0, run = 0, maxRun = 0;
         for (let y = 0; y < h; y++){
+          let prev = false, trans = 0, rowBright = 0;
           for (let x = 0; x < w; x++){
             const i = (y * w + x) * 4;
             const lum = 0.299*px[i] + 0.587*px[i+1] + 0.114*px[i+2];
+            const b = lum > 120;
             if (lum < 80) dark++;
-            else if (lum > 210){
-              white++;
-              if (y > h * 0.28 && y < h * 0.72) whiteMid++;
-            }
+            if (b){ rowBright++; brightTotal++; }
+            if (b !== prev){ trans++; prev = b; }
           }
+          // a "text row": many edges, but not a mostly-bright row
+          if (trans >= 14 && rowBright < w * 0.5){ texty++; run++; if (run > maxRun) maxRun = run; }
+          else run = 0;
         }
         const n = w * h;
         const looksGameOver =
-          dark / n > 0.60 &&                          // scene is dimmed out
-          white / n > 0.008 && white / n < 0.18 &&    // some white text, not a bright scene
-          whiteMid / Math.max(white, 1) > 0.55;       // and it sits in the middle band
+          dark / n > 0.62 &&            // screen is dark / dimmed out
+          brightTotal / n < 0.2 &&      // sparse content, not a busy scene
+          maxRun >= 4 &&                // a solid band of text rows...
+          texty <= h * 0.25;            // ...but text isn't covering the screen
         if (looksGameOver && shot.isConnected) shot.remove();
       } catch(e){ /* cross-origin pixels blocked -> keep the screenshot */ }
     };
