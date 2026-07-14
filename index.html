@@ -424,11 +424,22 @@
     return m ? m[0] : null;
   }
   const simUrl = id => "https://arcade.makecode.com/---run?id=" + encodeURIComponent(id);
-  // Static screenshot MakeCode saves when a project is shared. Tried with the
-  // share id as-is, then without the leading underscore; if neither exists
-  // (student skipped the screenshot step) the standby label shows instead.
-  const thumbUrl = id => "https://makecode.com/api/" + encodeURIComponent(id) + "/thumb";
-  const thumbUrlAlt = id => "https://makecode.com/api/" + encodeURIComponent(id.replace(/^_/, "")) + "/thumb";
+  // Candidate URLs for a cabinet's preview image, tried in order until one loads.
+  // MakeCode stores the full-size share image (the animated GIF, when the student
+  // recorded one) separately from the small static thumbnail — so we try the
+  // full-size /screenshot asset first and only fall back to /thumb, with and
+  // without the leading underscore on the share id.
+  function shotSources(id){
+    const api = "https://makecode.com/api/";
+    const ids = [id];
+    const bare = id.replace(/^_/, "");
+    if (bare !== id) ids.push(bare);
+    const urls = [];
+    for (const kind of ["screenshot", "thumb"]){
+      for (const i of ids) urls.push(api + encodeURIComponent(i) + "/" + kind);
+    }
+    return urls;
+  }
 
   /* ---------- game wall state ---------- */
   const grid = document.getElementById("grid");
@@ -527,20 +538,19 @@
         '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
         '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
 
-      // Shared image (animated GIF if recorded, else screenshot), lazy-loaded.
+      // Shared image: animated GIF where one was recorded, else the static
+      // screenshot; walks the candidate URLs until one loads.
+      const sources = shotSources(g.id);
+      let srcIdx = 0;
       const shot = document.createElement("img");
       shot.className = "shot";
       shot.loading = "lazy";
       shot.alt = "";
-      shot.dataset.fallback = "1";
-      shot.src = thumbUrl(g.id);
+      shot.src = sources[srcIdx];
       shot.addEventListener("error", ()=>{
-        if (shot.dataset.fallback === "1"){
-          shot.dataset.fallback = "0";
-          shot.src = thumbUrlAlt(g.id);   // retry without the leading underscore
-        } else {
-          shot.remove();                  // nothing saved -> standby label shows
-        }
+        srcIdx++;
+        if (srcIdx < sources.length) shot.src = sources[srcIdx];
+        else shot.remove();             // nothing saved -> standby label shows
       });
       cab.querySelector(".screen").appendChild(shot);
 
