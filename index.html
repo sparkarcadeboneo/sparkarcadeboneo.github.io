@@ -156,6 +156,26 @@
   }
   .cab.spotlight .gname{color:var(--volt)}
 
+  /* "remix" button — opens the game in the MakeCode editor */
+  .remix-btn{
+    position:absolute;top:14px;right:14px;z-index:3;
+    font-family:inherit;font-size:11px;letter-spacing:2px;text-transform:uppercase;
+    background:rgba(11,15,20,.85);border:1px solid var(--volt);border-radius:4px;
+    color:var(--volt);padding:4px 10px;cursor:pointer;
+    opacity:0;transition:opacity .2s, background .2s, transform .15s;
+    backdrop-filter:blur(2px);
+  }
+  .cab:hover .remix-btn,
+  .cab.spotlight .remix-btn,
+  .remix-btn:focus-visible{opacity:1}
+  .remix-btn:hover{
+    background:var(--volt);color:#0b0f14;
+    box-shadow:0 0 14px rgba(255,214,10,.55);
+    transform:scale(1.06);
+  }
+  .remix-btn:focus-visible{outline:2px solid var(--arc);outline-offset:2px}
+  @media (hover:none){.remix-btn{opacity:1}}
+
   /* rotating arcade machine placeholder (no usable screenshot / game-over shot) */
   .screen .coinup{
     position:absolute;inset:0;
@@ -440,6 +460,9 @@
     return m ? m[0] : null;
   }
   const simUrl = id => "https://arcade.makecode.com/---run?id=" + encodeURIComponent(id);
+  // Loads the shared project straight into the MakeCode editor — students can
+  // start changing blocks immediately and MakeCode saves it as their own copy.
+  const editUrl = id => "https://arcade.makecode.com/#pub:" + encodeURIComponent(id);
   // Candidate URLs for a cabinet's preview image, tried in order until one loads.
   // MakeCode stores the full-size share image (the animated GIF, when the student
   // recorded one) separately from the small static thumbnail — so we try the
@@ -617,8 +640,16 @@
       cab.dataset.gname = g.game;
       cab.innerHTML =
         '<div class="screen">' + COIN_HTML + '</div>' +
+        '<button class="remix-btn" type="button" title="Open this game in the MakeCode editor and make your own version">&#9889; Remix</button>' +
         '<div class="label"><div class="gname">' + esc(g.game) + '</div>' +
         '<div class="who">by ' + esc(g.name) + ' &bull; ' + esc(g.grade) + '</div></div>';
+
+      // Remix: open the game in the MakeCode editor in a new tab. Stop the
+      // click from bubbling so it doesn't also launch the game full-screen.
+      cab.querySelector(".remix-btn").addEventListener("click", (e)=>{
+        e.stopPropagation();
+        window.open(editUrl(g.id), "_blank", "noopener");
+      });
 
       // Shared image: animated GIF where one was recorded, else the static
       // screenshot; walks the candidate URLs until one loads. Game-over
