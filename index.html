@@ -310,7 +310,7 @@
       <p id="emptyText">New games added to the spreadsheet will appear here automatically.</p>
     </div>
     <div class="hintbar" id="hintbar">
-      &#127918; <kbd>D-Pad / Stick</kbd> scroll &amp; select &nbsp; <kbd>A</kbd> launch &nbsp; <kbd>LB / RB</kbd> jump &nbsp; <kbd>Start</kbd> auto-scroll &nbsp;&bull;&nbsp; arrows + Enter work too &nbsp; <kbd>/</kbd> search
+      &#128377;&#65039; <kbd>Stick</kbd> scroll &amp; select &nbsp; <kbd>A</kbd> launch &nbsp; <kbd>B</kbd> attract mode &nbsp; <kbd>L / R</kbd> jump &nbsp; <kbd>Start</kbd> auto-scroll &nbsp;&bull;&nbsp; arrows + Enter work too &nbsp; <kbd>/</kbd> search
     </div>
   </section>
 
@@ -319,7 +319,7 @@
 <div id="player">
   <iframe id="playerFrame" title="Game player" allow="autoplay" src="about:blank"></iframe>
 </div>
-<div id="playerHint">Hold <kbd>Start</kbd> + <kbd>Back</kbd> together (or press <kbd>Esc</kbd>) to return to the menu</div>
+<div id="playerHint">Hold <kbd>Start</kbd> + <kbd>Select</kbd> together (or press <kbd>Esc</kbd>) to return to the menu</div>
 
 <footer>SPARK Centre &bull; Boneo Primary School &bull; Free Play</footer>
 
@@ -760,11 +760,21 @@
   }
 
   /* ---------- input: gamepad + keyboard ---------- */
+  /* Tuned for the 8BitDo Arcade Stick on Firefox / Ubuntu.
+     - 8BitDo uses Nintendo-style labels, so the button printed "A" arrives
+       as browser button 1 and "B" as button 0. If A/B ever feel reversed
+       (e.g. after flicking the X/D/S mode switch), just set AB_SWAPPED to
+       false below - nothing else needs touching.
+     - The joystick works whichever position its DP / LS / RS switch is in:
+       d-pad buttons (12-15), stick axes and Linux "hat" axes are all read.
+       DP or LS are the most reliable positions.
+     - Start + Select together returns to the menu, even mid-game. Firefox
+       on Linux reports that pair as 9/8, 7/6 or 11/10 depending on the
+       stick's mode, so all three pairs are recognised. */
+  const AB_SWAPPED = true;
   const padBadge = document.getElementById("padBadge");
   const DEADZONE = 0.5;
-  const prevBtns = {};      // per-gamepad previous button state
-  let stickHeld = {x:0, y:0};
-  let comboHeld = {};       // per-gamepad Start+Back combo edge detection
+  const padState = {};   // per-gamepad: previous buttons, stick edges, resting axes, combo edge
 
   window.addEventListener("gamepadconnected", ()=> padBadge.classList.add("on"));
   window.addEventListener("gamepaddisconnected", ()=>{
@@ -777,42 +787,74 @@
     fn();
   }
 
+  // Likely (Start, Select) index pairs for how Firefox exposes this pad.
+  function startSelectPairs(pad){
+    if (pad.mapping === "standard") return [[9,8]];
+    return pad.buttons.length <= 11 ? [[7,6],[9,8]] : [[9,8],[11,10]];
+  }
+
+  // Axis pairs that can carry the joystick (left stick, right stick, d-pad hat).
+  function axisPairs(pad){
+    if (pad.mapping === "standard") return [[0,1],[2,3]];
+    return [[0,1],[2,3],[4,5],[6,7]];
+  }
+
   function pollPads(){
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const pad of pads){
       if (!pad) continue;
-      const prev = prevBtns[pad.index] || [];
+      const st = padState[pad.index] ||
+                 (padState[pad.index] = {btns:[], sticks:{}, rest:null, combo:false});
       const pressed = i => pad.buttons[i] && pad.buttons[i].pressed;
-      const justPressed = i => pressed(i) && !prev[i];
+      const justPressed = i => pressed(i) && !st.btns[i];
 
-      // Start (9) + Back/Select (8) together -> return to the menu, works while a game is playing
-      const comboNow = pressed(9) && pressed(8);
-      if (comboNow && !comboHeld[pad.index] && inGame) returnToMenu();
-      comboHeld[pad.index] = comboNow;
+      // Note where each axis rests the first time we see the pad, so analogue
+      // triggers (which idle at -1) never read as stick movement. An axis is
+      // trusted again as soon as it's seen back at centre.
+      if (!st.rest) st.rest = pad.axes.map(v => Math.abs(v) > DEADZONE);
+      pad.axes.forEach((v,i)=>{ if (st.rest[i] && Math.abs(v) < 0.2) st.rest[i] = false; });
+
+      // Start + Select together -> return to the menu, works while a game is playing
+      const ssPairs = startSelectPairs(pad);
+      const comboNow = ssPairs.some(([s,b]) => pressed(s) && pressed(b));
+      if (comboNow && !st.combo && inGame) returnToMenu();
+      st.combo = comboNow;
 
       if (wallActive && !inGame && view.length){
         const cols = actualCols();
-        // D-pad: 12 up, 13 down, 14 left, 15 right
+
+        // D-pad as buttons (standard mapping): 12 up, 13 down, 14 left, 15 right
         if (justPressed(15)) manualInput(()=> moveSpot(1));
         if (justPressed(14)) manualInput(()=> moveSpot(-1));
         if (justPressed(13)) manualInput(()=> moveSpot(cols));
         if (justPressed(12)) manualInput(()=> moveSpot(-cols));
-        // Left stick with edge detection
-        const x = pad.axes[0] || 0, y = pad.axes[1] || 0;
-        const sx = Math.abs(x) > DEADZONE ? Math.sign(x) : 0;
-        const sy = Math.abs(y) > DEADZONE ? Math.sign(y) : 0;
-        if (sx !== 0 && sx !== stickHeld.x) manualInput(()=> moveSpot(sx));
-        if (sy !== 0 && sy !== stickHeld.y) manualInput(()=> moveSpot(sy * cols));
-        stickHeld = {x:sx, y:sy};
-        // Bumpers: 4 LB, 5 RB -> jump-scroll by roughly one screen
+
+        // Joystick / d-pad hat as axes, with per-pair edge detection
+        for (const [xi, yi] of axisPairs(pad)){
+          if (st.rest[xi] || st.rest[yi]) continue;   // skip trigger-style axes
+          const x = pad.axes[xi] || 0, y = pad.axes[yi] || 0;
+          const sx = Math.abs(x) > DEADZONE ? Math.sign(x) : 0;
+          const sy = Math.abs(y) > DEADZONE ? Math.sign(y) : 0;
+          const held = st.sticks[xi] || (st.sticks[xi] = {x:0, y:0});
+          if (sx !== 0 && sx !== held.x) manualInput(()=> moveSpot(sx));
+          if (sy !== 0 && sy !== held.y) manualInput(()=> moveSpot(sy * cols));
+          held.x = sx; held.y = sy;
+        }
+
+        // L / R (4/5): jump-scroll by roughly one screen
         if (justPressed(5)) manualInput(()=> jumpScroll(1));
         if (justPressed(4)) manualInput(()=> jumpScroll(-1));
-        // A (0): launch the selected game full-window
-        if (justPressed(0)) manualInput(()=> launchGame(view[spot]));
-        // Start (9) alone: hand back to auto-scroll
-        if (justPressed(9) && !pressed(8)) setMode(mode === "auto" ? "manual" : "auto");
+
+        // A launches the spotlit game; B backs out to auto-scroll attract mode
+        const BTN_A = AB_SWAPPED ? 1 : 0, BTN_B = AB_SWAPPED ? 0 : 1;
+        if (justPressed(BTN_A)) manualInput(()=> launchGame(view[spot]));
+        if (justPressed(BTN_B) && mode === "manual") setMode("auto");
+
+        // Start alone: toggle auto-scroll on/off
+        if (ssPairs.some(([s,b]) => justPressed(s) && !pressed(b)))
+          setMode(mode === "auto" ? "manual" : "auto");
       }
-      prevBtns[pad.index] = pad.buttons.map(b=> b.pressed);
+      st.btns = pad.buttons.map(b=> b.pressed);
     }
     // idle in manual mode -> resume auto
     if (mode === "manual" && !inGame && Date.now() - lastInput > IDLE_BACK_TO_AUTO) setMode("auto");
